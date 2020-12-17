@@ -17,7 +17,6 @@ class BotManController extends Controller
         /** @var \BotMan\BotMan\BotMan $botman */
         $botman = app('botman');
 
-        echo 'listen';
         $botman->listen();
     }
 

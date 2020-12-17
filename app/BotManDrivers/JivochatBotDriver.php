@@ -4,6 +4,7 @@
 namespace App\BotManDrivers;
 
 
+use BotMan\BotMan\Drivers\Events\GenericEvent;
 use BotMan\BotMan\Interfaces\DriverInterface;
 use BotMan\BotMan\Interfaces\UserInterface;
 use BotMan\BotMan\Messages\Attachments\Audio;
@@ -18,17 +19,28 @@ use BotMan\BotMan\Messages\Outgoing\OutgoingMessage;
 use BotMan\BotMan\Messages\Outgoing\Question;
 use BotMan\BotMan\Users\User;
 use Carbon\Carbon;
-use Illuminate\Support\Collection;
 use Ramsey\Uuid\Uuid;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Twilio\Rest\Client;
 
 
-class MfmsWhatsAppDriver extends \BotMan\BotMan\Drivers\HttpDriver
+class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
 {
-    const DRIVER_NAME = 'MfmsWhatsApp';
-    const API = 'https://im.edna.io/api';
+    const DRIVER_NAME = 'JivochatBot';
+
+    /** @var string messages would be sent to jivo using this endpoint */
+    const JIVO_ENDPOINT = 'https://bot.jivosite.com/webhooks/{provider_id}';
+
+    const ERROR_INVALID_CLIENT = 'invalid_client';
+    const ERROR_UNAUTHORIZED_CLIENT = 'unauthorized_client';
+    const ERROR_INVALID_REQUEST = 'invalid_request';
+
+    const EVENT_CLIENT_MESSAGE = 'CLIENT_MESSAGE'; //handle this event
+    const EVENT_BOT_MESSAGE = 'BOT_MESSAGE';
+    const EVENT_INVITE_AGENT = 'INVITE_AGENT';
+    const EVENT_AGENT_JOINED = 'AGENT_JOINED'; //handle this event
+    const EVENT_AGENT_UNAVAILABLE = 'AGENT_UNAVAILABLE';//handle this event
 
     /**
      * @var IncomingMessage[]
@@ -37,6 +49,17 @@ class MfmsWhatsAppDriver extends \BotMan\BotMan\Drivers\HttpDriver
 
     /** @var string */
     protected $requestUri;
+
+    /**
+     * @param $code
+     * @param $message
+     * @return array
+     */
+    private function prepareErrorResponseBody($code, $message){
+        return [
+            'error' => compact('code', 'message')
+        ];
+    }
 
 
     /**
@@ -51,6 +74,16 @@ class MfmsWhatsAppDriver extends \BotMan\BotMan\Drivers\HttpDriver
             $this->messages = [$message];
         }
         return $this->messages;
+    }
+
+    public function hasMatchingEvent()
+    {
+        if($this->event->has('event')){
+            $event = new GenericEvent($this->event);
+            $event->setName($this->event->has('event'));
+            return $event;
+        }
+        return false;
     }
 
     /**
@@ -96,6 +129,7 @@ class MfmsWhatsAppDriver extends \BotMan\BotMan\Drivers\HttpDriver
         if ($message instanceof Question) {
             $text = $message->getText();
             $parameters['buttons'] = $message->getButtons() ?? [];
+            $parameters['event'] = self::EVENT_CLIENT_MESSAGE;
         } elseif ($message instanceof OutgoingMessage) {
             $text = $message->getText();
 
@@ -169,14 +203,6 @@ class MfmsWhatsAppDriver extends \BotMan\BotMan\Drivers\HttpDriver
         $parameters['to'] = $matchingMessage->getSender();
         $parameters['from'] = $matchingMessage->getRecipient();
 
-        /** @var Collection $matching_message_payload */
-        $matching_message_payload = $matchingMessage->getPayload();
-        if($matching_message_payload){
-            $parameters['imSubject'] = $matching_message_payload->get('imSubject', $this->config->get('imSubject'));
-        }else{
-            $parameters['imSubject'] = $this->config->get('imSubject');
-        }
-
         unset($parameters['buttons']);
 
         return $parameters;
@@ -189,13 +215,15 @@ class MfmsWhatsAppDriver extends \BotMan\BotMan\Drivers\HttpDriver
     {
         $payload_to_send = [
             'id' => Uuid::uuid4()->toString(),
-            'subject' => $payload['imSubject'],
-            'address' => $payload['to'],
-            'priority' => 'high',
-            'validityPeriodSeconds' => 86400,
-            //'startTime' => Carbon::now()->format('Y-m-d\TH:i:s'),
-            'contentType' => 'text'
+            'event' => $payload['event']
         ];
+
+        if(isset($payload['event']) && $payload['event'] && in_array($payload['event'], [self::EVENT_INVITE_AGENT])){
+            $payload_to_send['client_id'] = $payload['client_id'];
+            $payload_to_send['chat_id'] = $payload['chat_id'];
+        }else{
+
+        }
 
         if(isset($payload['message'])){
             $payload_to_send['text'] = $payload['message'];
@@ -238,7 +266,7 @@ class MfmsWhatsAppDriver extends \BotMan\BotMan\Drivers\HttpDriver
         $input = file_get_contents('php://input');
         $webhookRequest = json_decode($input, false);
 
-        logger()->alert('incoming mfms chat', ['input'=>$webhookRequest, 'class' =>get_class($this)]);
+        logger()->alert('incoming jivo bot chat', ['input'=>$webhookRequest, 'class' =>get_class($this)]);
 
         $this->payload = $webhookRequest;
         $this->requestUri = $request->getUri();
