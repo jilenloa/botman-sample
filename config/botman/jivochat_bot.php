@@ -12,4 +12,5 @@ return [
     |
     */
     'provider_id' => env('JIVOCHAT_BOT_PROVIDER_ID'),
+    'token' => env('JIVOCHAT_BOT_TOKEN'), //this is issued by you and given to Jivo
 ];

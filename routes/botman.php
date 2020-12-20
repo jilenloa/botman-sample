@@ -9,3 +9,5 @@ $botman->hears('Hi', function ($bot) {
 });
 $botman->hears('Start conversation', BotManController::class.'@startConversation');
 $botman->hears('delivery', BotManController::class.'@startConversation2');
+
+//$botman->on()

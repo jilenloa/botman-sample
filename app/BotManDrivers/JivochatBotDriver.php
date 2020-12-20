@@ -30,7 +30,8 @@ class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
     const DRIVER_NAME = 'JivochatBot';
 
     /** @var string messages would be sent to jivo using this endpoint */
-    const JIVO_ENDPOINT = 'https://bot.jivosite.com/webhooks/{provider_id}';
+    const JIVO_NEW_ENDPOINT = 'https://bot.jivosite.com/webhooks/{provider_id}';
+    const JIVO_TOKEN_ENDPOINT = 'https://bot.jivosite.com/webhooks/{provider_id}/{token}';
 
     const ERROR_INVALID_CLIENT = 'invalid_client';
     const ERROR_UNAUTHORIZED_CLIENT = 'unauthorized_client';
@@ -41,6 +42,9 @@ class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
     const EVENT_INVITE_AGENT = 'INVITE_AGENT';
     const EVENT_AGENT_JOINED = 'AGENT_JOINED'; //handle this event
     const EVENT_AGENT_UNAVAILABLE = 'AGENT_UNAVAILABLE';//handle this event
+    const EVENT_ERROR = 'ERROR';//handle this event
+
+    protected $authenticated;
 
     /**
      * @var IncomingMessage[]
@@ -55,7 +59,7 @@ class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
      * @param $message
      * @return array
      */
-    private function prepareErrorResponseBody($code, $message){
+    public static function prepareErrorResponseBody($code, $message){
         return [
             'error' => compact('code', 'message')
         ];
@@ -70,7 +74,12 @@ class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
     public function getMessages()
     {
         if (empty($this->messages)) {
-            $message = new IncomingMessage($this->event->get('text'), $this->event->get('address'), $this->event->get('address'), $this->event);
+            $_msg = $this->event->get('message', []);
+            $text = $_msg['text'] ?? '';
+            if(isset($_msg['button_id'])){
+                $text = $_msg['button_id'];
+            }
+            $message = new IncomingMessage($text, $this->event->get('chat_id'), $this->event->get('chat_id'), $this->event);
             $this->messages = [$message];
         }
         return $this->messages;
@@ -78,7 +87,11 @@ class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
 
     public function hasMatchingEvent()
     {
-        if($this->event->has('event')){
+        if(!$this->authenticated){
+            $event = new GenericEvent(collect(['code' => self::ERROR_INVALID_CLIENT, 'message' => "Authentication failed"]));
+            $event->setName(self::EVENT_ERROR);
+            return $event;
+        } else if($this->event->has('event')){
             $event = new GenericEvent($this->event);
             $event->setName($this->event->has('event'));
             return $event;
@@ -193,17 +206,31 @@ class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
         }
 
         $parameters['message'] = $text;
+        $parameters['message_nobuttons'] = $text;
+        $formatted_buttons  = [];
         if(isset($parameters['buttons']) && $parameters['buttons']){
-            $parameters['message'] .= "\n";
-            foreach((array)$parameters['buttons'] as $menu_item){
-                $parameters['message'] .= "{$menu_item['value']}. {$menu_item['text']}\n";
+            if(count($parameters['buttons']) > 3){
+                $parameters['message'] .= "\n";
+                $formatted_buttons = [];
+                foreach((array)$parameters['buttons'] as $menu_item){
+                    $parameters['message'] .= "{$menu_item['value']}. {$menu_item['text']}\n";
+                }
+            }else{
+                $parameters['message_nobuttons'] .= "\n";
+                foreach((array)$parameters['buttons'] as $menu_item){
+                    $parameters['message_nobuttons'] .= "{$menu_item['value']}. {$menu_item['text']}\n";
+                    $formatted_buttons[] = [
+                        'text' => $menu_item['text'],
+                        'id' => $menu_item['value'],
+                    ];
+                }
             }
         }
 
         $parameters['to'] = $matchingMessage->getSender();
         $parameters['from'] = $matchingMessage->getRecipient();
 
-        unset($parameters['buttons']);
+        $parameters['buttons'] = $formatted_buttons;
 
         return $parameters;
     }
@@ -215,45 +242,59 @@ class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
     {
         $payload_to_send = [
             'id' => Uuid::uuid4()->toString(),
-            'event' => $payload['event']
+            'event' => $payload['event'] ?? self::EVENT_BOT_MESSAGE
         ];
 
         if(isset($payload['event']) && $payload['event'] && in_array($payload['event'], [self::EVENT_INVITE_AGENT])){
             $payload_to_send['client_id'] = $payload['client_id'];
             $payload_to_send['chat_id'] = $payload['chat_id'];
-        }else{
-
         }
 
-        if(isset($payload['message'])){
-            $payload_to_send['text'] = $payload['message'];
-        }
+        if($payload_to_send == self::EVENT_BOT_MESSAGE){
+            $payload_to_send['message'] = [
+                'text' => $payload['message'] ?? ''
+            ];
 
-        if(isset($payload['location'])){
-            $payload_to_send['latitude'] = $payload['location'][0];
-            $payload_to_send['longitude'] = $payload['location'][1];
-            $payload_to_send['contentType'] = 'location';
+            if(isset($payload['buttons']) && $payload['buttons']){
+                $payload_to_send['message']['type'] = 'BUTTONS';
+                $payload_to_send['message']['title'] = $payload['message'];
+                $payload_to_send['message']['text'] = $payload['message_nobuttons'];
+            }else{
+                $payload_to_send['message']['type'] = 'TEXT';
+            }
 
-            if(isset($payload['location'][2]) && $payload['location'][2]){
-                $payload_to_send['caption'] = $payload['location'][2];
+            if(isset($payload['location'])){
+                if(isset($payload['location'][2]) && $payload['location'][2]){
+                    $payload_to_send['message']['text'] .= sprintf("Location: %s,%s (%s)", $payload['location'][0], $payload['location'][1], $payload['location'][2]);
+                }else{
+                    $payload_to_send['message']['text'] .= sprintf("Location: %s,%s", $payload['location'][0], $payload['location'][1]);
+                }
+            }
+
+            if(isset($payload['contact'])){
+                $payload_to_send['message']['text'] .= sprintf("Contact: %s (%s)", $payload['contact'][0], $payload['contact'][1]);
+            }
+
+            if(isset($payload['file'])){
+                if(isset($payload['file']['caption']) && $payload['file']['caption']){
+                    $payload_to_send['message']['text'] .= sprintf("File: %s (%s)", $payload['file']['fileUrl'], $payload['file']['caption']);
+                }else{
+                    $payload_to_send['message']['text'] .= sprintf("File: %s", $payload['file']['fileUrl']);
+                }
             }
         }
 
-        if(isset($payload['file'])){
-            if(isset($payload['file']['caption']) && $payload['file']['caption']){
-                $payload_to_send['attachmentName'] = $payload['file']['caption'];
-            }
-            $payload_to_send['attachmentUrl'] = $payload['file']['fileUrl'];
-            $payload_to_send['contentType'] = $payload['file']['contentType'];
-        }
+        $url = strtr(self::JIVO_NEW_ENDPOINT, [
+            '{provider_id}' => $this->config->get('provider_id'),
+            '{token}' => ''
+        ]);
 
-        $request = $this->http->post(self::API.'/imOutMessage', [], $payload_to_send, [
+        $request = $this->http->post($url, [], $payload_to_send, [
             'Content-Type: application/json',
-            'X-API-KEY: '.$this->config->get('apiKey'),
             'Accept: */*'
         ], true);
 
-        logger()->alert('response from mfms', ['response' => $request->getContent(), 'payload' => $payload_to_send]);
+        logger()->alert('response from jivo', ['response' => $request->getContent(), 'payload' => $payload_to_send]);
 
         return $request;
     }
@@ -271,7 +312,9 @@ class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
         $this->payload = $webhookRequest;
         $this->requestUri = $request->getUri();
         $this->event = \Illuminate\Support\Collection::make($this->payload);
-        $this->config = \Illuminate\Support\Collection::make($this->config->get('mfms_whatsapp', []));
+        $this->config = \Illuminate\Support\Collection::make($this->config->get('jivochat_bot', []));
+
+        $this->authenticated = $this->config->get('token') == basename($request->getPathInfo());
     }
 
     /**
@@ -289,7 +332,7 @@ class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
      */
     public function matchesRequest()
     {
-        return $this->event->has('apiKeyId') && $this->event->get('apiKeyId') && $this->event->get('imType') == 'whatsapp';
+        return $this->event->has('event') && $this->event->get('id');
     }
 
     /**
