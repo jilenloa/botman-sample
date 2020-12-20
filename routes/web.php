@@ -15,7 +15,7 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-Route::match(['get', 'post'], '/botman', 'BotManController@handle');
+Route::match(['get', 'post'], '/botman/{token?}', 'BotManController@handle');
 Route::match(['get', 'post'], '/twilio-wastatus', function(){
     return 'ok';
 });

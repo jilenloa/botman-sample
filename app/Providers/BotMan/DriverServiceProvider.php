@@ -2,6 +2,7 @@
 
 namespace App\Providers\BotMan;
 
+use App\BotManDrivers\JivochatBotDriver;
 use App\BotManDrivers\MfmsWhatsAppDriver;
 use App\BotManDrivers\MfmsWhatsAppLocationDriver;
 use App\BotManDrivers\TwilioWhatsAppAudioDriver;
@@ -24,6 +25,8 @@ class DriverServiceProvider extends ServiceProvider
      * @var array
      */
     protected $drivers = [
+        JivochatBotDriver::class,
+
         MfmsWhatsAppDriver::class,
         MfmsWhatsAppLocationDriver::class,
 
