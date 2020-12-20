@@ -19,6 +19,7 @@ use BotMan\BotMan\Messages\Outgoing\OutgoingMessage;
 use BotMan\BotMan\Messages\Outgoing\Question;
 use BotMan\BotMan\Users\User;
 use Carbon\Carbon;
+use League\HTMLToMarkdown\HtmlConverter;
 use Ramsey\Uuid\Uuid;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -271,6 +272,13 @@ class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
                 $payload_to_send['message']['type'] = 'BUTTONS';
                 $payload_to_send['message']['title'] = $payload['message'];
                 $payload_to_send['message']['text'] = $payload['message_nobuttons'];
+            }elseif(isset($payload['type']) && strtolower($payload['type']) == 'markdown'){
+                $payload_to_send['message']['type'] = 'MARKDOWN';
+                $converter = new HtmlConverter();
+                $markdown = $converter->convert($payload['message']);
+
+                $payload_to_send['message']['content'] = $markdown;
+                $payload_to_send['message']['text'] = strip_tags($payload['message']);
             }else{
                 $payload_to_send['message']['type'] = 'TEXT';
             }

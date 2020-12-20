@@ -23,6 +23,7 @@ $botman->on(JivochatBotDriver::EVENT_AGENT_UNAVAILABLE, function($payload, $bot)
 
 $botman->on(JivochatBotDriver::EVENT_AGENT_JOINED, function($payload, $bot){
     logger()->alert('agent joined');
+    $bot->reply('ok');
 });
 
 $botman->fallback(function($bot){

@@ -19,6 +19,7 @@
         "fideloper/proxy": "^4.0",
         "laravel/framework": "5.7.*",
         "laravel/tinker": "^1.0",
+        "league/html-to-markdown": "^4.10",
         "sabre/vobject": "^4.3",
         "twilio/sdk": "^6.14"
     },
