@@ -373,4 +373,5 @@ class JivochatBotDriver extends \BotMan\BotMan\Drivers\HttpDriver
             ->setInteractiveReply(true)
             ->setMessage($message);
     }
+
 }
